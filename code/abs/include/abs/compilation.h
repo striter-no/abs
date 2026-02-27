@@ -1,4 +1,8 @@
 #include "configuration.h"
+#include <dirent.h>
+#include <linux/limits.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #ifndef ABS_COMPILATION
 
@@ -148,6 +152,23 @@ void compiler_conf_free(compiler_conf *cfg) {
     if (cfg->out_dir) free(cfg->out_dir);
     if (cfg->pkg_config_path) free(cfg->pkg_config_path);
     if (cfg->build_type) free(cfg->build_type);
+    
+    if (cfg->obj_dir){
+        DIR* dp;
+        struct dirent* ep;
+
+        dp = opendir(cfg->obj_dir);
+        if (dp != NULL){
+            while((ep = readdir(dp))){
+                char path[PATH_MAX];
+                snprintf(path, PATH_MAX, "%s/%s", cfg->obj_dir, ep->d_name);
+                remove(path);
+            }
+        }
+        closedir(dp);
+        rmdir(cfg->obj_dir);
+    }
+    
     if (cfg->obj_dir) free(cfg->obj_dir);
 
     memset(cfg, 0, sizeof(compiler_conf));
