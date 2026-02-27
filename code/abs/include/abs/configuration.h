@@ -6,6 +6,8 @@
 #include <libgen.h>
 #include <string.h>
 #include <glob.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #ifndef ABS_CONFIGURATION
 
@@ -35,6 +37,9 @@ typedef struct {
 
     char **defines;
     size_t defines_n;
+
+    char *build_type;
+    char *obj_dir;
 
     char *active_mode;
     bool  hardening;
@@ -196,12 +201,10 @@ static char *extract_lib_name(const char *filepath) {
     const char *filename = strrchr(filepath, '/');
     filename = filename ? filename + 1 : filepath;
     
-    // Удаляем префикс "lib"
     if (strncmp(filename, "lib", 3) == 0) {
         filename += 3;
     }
     
-    // Удаляем суффиксы .a, .so, .so.*
     char *name = strdup(filename);
     if (!name) return NULL;
     
@@ -217,7 +220,6 @@ static char *extract_lib_name(const char *filepath) {
     return name;
 }
 
-/* Функция расширения библиотек с поддержкой глобов */
 static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_conf *cfg) {
     if (!libs_str) return -1;
     
@@ -233,9 +235,7 @@ static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_
                 glob_t glob_result;
                 char pattern[PATH_MAX];
                 
-                // Если есть lib_dirs, ищем там
                 if (lib_dirs_str && *lib_dirs_str) {
-                    // lib_dirs может содержать несколько путей через пробел
                     char *libdirs_buf = strdup(lib_dirs_str);
                     char *libdirs_saveptr = NULL;
                     char *libdir = strtok_r(libdirs_buf, " \t\n", &libdirs_saveptr);
@@ -249,21 +249,29 @@ static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_
                         if (ret == 0 && glob_result.gl_pathc > 0) {
                             for (size_t i = 0; i < glob_result.gl_pathc; i++) {
                                 char *full_path = glob_result.gl_pathv[i];
-                                char *dir = dirname(strdup(full_path));
+                                
+                                
+                                char *full_path_copy = strdup(full_path);
+                                if (!full_path_copy) continue;
+                                
+                                char *dir = dirname(full_path_copy);
+                                char *dir_copy = strdup(dir);  
                                 char *lib_name = extract_lib_name(full_path);
                                 
-                                if (dir) {
-                                    _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
-                                    free(dir);
+                                if (dir_copy) {
+                                    _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir_copy);
+                                    free(dir_copy);  
                                 }
                                 if (lib_name) {
                                     _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
                                     free(lib_name);
                                 }
+                                
+                                free(full_path_copy);
                             }
                             found = 1;
                             globfree(&glob_result);
-                            break; // Нашли в первой директории
+                            break;
                         }
                         
                         libdir = strtok_r(NULL, " \t\n", &libdirs_saveptr);
@@ -275,45 +283,54 @@ static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_
                                 abs_fore.yellow, abs_fore.normal, token);
                     }
                 } else {
-                    // Ищем относительно текущей директории
                     int ret = glob(token, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
                     
                     if (ret == 0) {
                         for (size_t i = 0; i < glob_result.gl_pathc; i++) {
                             char *full_path = glob_result.gl_pathv[i];
-                            char *dir = dirname(strdup(full_path));
+                            
+                            char *full_path_copy = strdup(full_path);
+                            if (!full_path_copy) continue;
+                            
+                            char *dir = dirname(full_path_copy);
+                            char *dir_copy = strdup(dir);
                             char *lib_name = extract_lib_name(full_path);
                             
-                            if (dir) {
-                                _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
-                                free(dir);
+                            if (dir_copy) {
+                                _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir_copy);
+                                free(dir_copy);
                             }
                             if (lib_name) {
                                 _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
                                 free(lib_name);
                             }
+                            
+                            free(full_path_copy);
                         }
                         globfree(&glob_result);
                     }
                 }
             } else {
-                // Обычная библиотека (без глоба)
-                // Проверяем, это имя (-l) или путь к файлу
+                
                 if (strchr(token, '/') || strstr(token, ".a") || strstr(token, ".so")) {
-                    // Это путь к файлу библиотеки
-                    char *dir = dirname(strdup(token));
+                    char *token_copy = strdup(token);
+                    if (!token_copy) continue;
+                    
+                    char *dir = dirname(token_copy);
+                    char *dir_copy = strdup(dir);
                     char *lib_name = extract_lib_name(token);
                     
-                    if (strcmp(dir, ".") != 0) {
-                        _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
+                    if (strcmp(dir, ".") != 0 && dir_copy) {
+                        _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir_copy);
+                        free(dir_copy);
                     }
                     if (lib_name) {
                         _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
                         free(lib_name);
                     }
-                    free(dir);
+                    
+                    free(token_copy);
                 } else {
-                    // Это просто имя библиотеки (например, "m" для -lm)
                     _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, token);
                 }
             }
@@ -377,10 +394,13 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     
     const char *mode_name = (strcmp(cfg->active_mode, "debug") == 0) 
                             ? "mode.debug" : "mode.release";
-    _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
-                      ini_get_at(ini, mode_name, "flags"));
+    if (mode_name)
+        _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
+                        ini_get_at(ini, mode_name, "flags"));
     
-    
+    cfg->build_type = nstrdup(ini_get_at(ini, "compiler", "build"));
+    if (!cfg->build_type) cfg->build_type = strdup("binary");
+
     const char *sec = ini_get_at(ini, 
         cfg->active_mode[0] == 'd' ? "mode.debug" : "mode.release", 
         "security");
@@ -389,6 +409,11 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     if (cfg->hardening) {
         _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
                         ini_get_at(ini, "flags", "hardening"));
+    }
+
+    cfg->obj_dir = nstrdup(ini_get_at(ini, "dirs", "objects"));
+    if (!cfg->obj_dir) {
+        cfg->obj_dir = strdup(".objs");
     }
     
     const char *lib_dirs_ini = ini_get_at(ini, "dirs", "libs");
@@ -401,10 +426,9 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
             exit(-1);
         }
     }
-
-    if (ini_get_at(ini, "dirs", "libs")) {
-        _cfg_append_flags(&cfg->include_dirs, &cfg->include_n, 
-                        ini_get_at(ini, "dirs", "libs"));
+    
+    if (lib_dirs_ini) {
+        _cfg_append_flags(&cfg->lib_dirs, &cfg->lib_dirs_n, lib_dirs_ini);
     }
 
     cfg->output = nstrdup(ini_get_at(ini, "files", "output"));

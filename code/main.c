@@ -25,18 +25,8 @@ void gen(){
 "sources = main.c\n"
 "output = main\n"
 "\n"
-"[dirs]\n"
-"output = .\n"
-"src = .\n"
-"\n"
 "[compiler]\n"
 "cc = gcc\n"
-"\n"
-"[modes]\n"
-"active = debug\n"
-"\n"
-"[mode.debug]\n"
-"flags = -g -O0 -fsanitize=address\n"
 "\n"
 "[flags]\n"
 "common = -std=c11 -Wall -Wextra -Wpedantic\n"
@@ -154,6 +144,11 @@ int build(const char *prog, const char *confpath){
 
 	build_modules(prog, resolved, &conf);
 
+	// no files
+	if (ini_check(&conf, "files")){
+		goto _end;
+	}
+
 	compiler_conf cconf;
 	memset(&cconf, 0, sizeof(cconf));
 	config_ini_parse(&conf, &cconf);
@@ -178,6 +173,7 @@ int build(const char *prog, const char *confpath){
 
 	compiler_conf_free(&cconf);
 
+_end:
 	ini_clear_config(&conf);
 	return 0;
 }
