@@ -1,0 +1,17 @@
+CompileFlags:
+	Add:
+		- "-Icode/abs/include"
+		- "-I/usr/include"
+		- "-Wall"
+---
+If:
+	PathMatch: [.*\.c, .*\.h]
+CompileFlags:
+	Add:
+		- "-std=c2x"
+---
+If:
+	PathExclude: [.*\.c, .*\.h]
+CompileFlags:
+	Add:
+		- "-std=c++2x"
