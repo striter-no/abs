@@ -39,7 +39,7 @@ void gen(){
 "flags = -g -O0 -fsanitize=address\n"
 "\n"
 "[flags]\n"
-"common = -stc=c11 -Wall -Wextra -Wpedantic\n"
+"common = -std=c11 -Wall -Wextra -Wpedantic\n"
 "\n"
 ;
 	FILE *o = fopen("./abs.conf", "w");
