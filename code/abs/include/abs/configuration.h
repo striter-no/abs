@@ -39,10 +39,12 @@ typedef struct {
     size_t defines_n;
 
     char *build_type;
+    char *build_phase;
     char *obj_dir;
 
     char *active_mode;
     bool  hardening;
+    bool  cleanup;
 } compiler_conf;
 
 static int has_glob_chars(const char *str) {
@@ -401,10 +403,16 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     cfg->build_type = nstrdup(ini_get_at(ini, "compiler", "build"));
     if (!cfg->build_type) cfg->build_type = strdup("binary");
 
+    cfg->build_phase = nstrdup(ini_get_at(ini, "compiler", "phase"));
+    if (!cfg->build_phase) cfg->build_phase = strdup("all");
+
     const char *sec = ini_get_at(ini, 
         cfg->active_mode[0] == 'd' ? "mode.debug" : "mode.release", 
         "security");
     cfg->hardening = sec && strcmp(sec, "true") == 0;
+    
+    const char *cleanup = ini_get_at(ini, "compiler", "cleanup");
+    cfg->cleanup = (cleanup == NULL) || strcmp(cleanup, "true") == 0;
 
     if (cfg->hardening) {
         _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
