@@ -344,7 +344,68 @@ static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_
     return 0;
 }
 
-int build_modules(const char *prog, const char *config_dir, ini_config *ini){
+static int expand_dir_paths(const char *base_dir, const char *dirs_str, 
+                            char ***out_arr, size_t *out_n) {
+    if (!dirs_str) return 0;
+    
+    char *buf = strdup(dirs_str);
+    if (!buf) return -1;
+    
+    char *saveptr = NULL;
+    char *token = strtok_r(buf, " \t\n", &saveptr);
+    
+    while (token) {
+        if (*token) {
+            if (has_glob_chars(token)) {
+                glob_t glob_result;
+                char pattern[PATH_MAX];
+                
+                if (base_dir) {
+                    snprintf(pattern, sizeof(pattern), "%s/%s", base_dir, token);
+                } else {
+                    snprintf(pattern, sizeof(pattern), "%s", token);
+                }
+                
+                int ret = glob(pattern, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
+                
+                if (ret == 0) {
+                    for (size_t i = 0; i < glob_result.gl_pathc; i++) {
+                        struct stat st;
+                        char *full_path = glob_result.gl_pathv[i];
+                        
+                        if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                            _cfg_append_str(out_arr, out_n, full_path);
+                        }
+                    }
+                    globfree(&glob_result);
+                } else if (ret == GLOB_NOMATCH) {
+                    fprintf(stderr, "%s[warn]%s no dirs matched pattern: %s\n", 
+                            abs_fore.yellow, abs_fore.normal, token);
+                }
+            } else {
+                char full_path[PATH_MAX];
+                if (base_dir) {
+                    snprintf(full_path, sizeof(full_path), "%s/%s", base_dir, token);
+                } else {
+                    snprintf(full_path, sizeof(full_path), "%s", token);
+                }
+                
+                struct stat st;
+                if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    _cfg_append_str(out_arr, out_n, full_path);
+                } else {
+                    _cfg_append_str(out_arr, out_n, full_path);
+                }
+            }
+        }
+        token = strtok_r(NULL, " \t\n", &saveptr);
+    }
+    
+    free(buf);
+    return 0;
+}
+
+int build_modules(const char *prog, const char *config_dir, ini_config *ini, int force_recompile){
     if (ini_check(ini, "modules") != 0) return 1;
 
     ini_iterator it = ini_iterator_init(ini);
@@ -364,8 +425,11 @@ int build_modules(const char *prog, const char *config_dir, ini_config *ini){
         free(inconf_path);
         
         const char *inconf_confpath = struntilnot(strchr(i.value, ',') + 1, ' ');
-
-        snprintf(command, PATH_MAX + 512, "cd %s && MAIN_DIR=%s %s %s", cdpath_buf, config_dir, prog, inconf_confpath);
+        if (!force_recompile){
+            snprintf(command, PATH_MAX + 512, "cd %s && MAIN_DIR=%s %s %s", cdpath_buf, config_dir, prog, inconf_confpath);
+        } else {
+            snprintf(command, PATH_MAX + 512, "cd %s && MAIN_DIR=%s %s -r %s", cdpath_buf, config_dir, prog, inconf_confpath);
+        }
         int r = system(command);
 
         if (r == 0){
@@ -434,11 +498,16 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
             exit(-1);
         }
     }
-    
-    if (lib_dirs_ini) {
-        _cfg_append_flags(&cfg->lib_dirs, &cfg->lib_dirs_n, lib_dirs_ini);
-    }
 
+    if (lib_dirs_ini) {
+        if (expand_dir_paths(".", lib_dirs_ini, 
+                            &cfg->lib_dirs, &cfg->lib_dirs_n) != 0) {
+            fprintf(stderr, "%s[error]%s failed to process lib dirs\n", 
+                    abs_fore.red, abs_fore.normal);
+            exit(-1);
+        }
+    }
+    
     cfg->output = nstrdup(ini_get_at(ini, "files", "output"));
     if (!cfg->output){
         fprintf(stderr, "%s[error]%s no output file set\n", 
@@ -451,9 +520,14 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
         cfg->src_dir = strdup(".");
     }
 
-    if (ini_get_at(ini, "dirs", "includes")) {
-        _cfg_append_flags(&cfg->include_dirs, &cfg->include_n, 
-                        ini_get_at(ini, "dirs", "includes"));
+    const char *include_dirs_ini = ini_get_at(ini, "dirs", "includes");
+    if (include_dirs_ini) {
+        if (expand_dir_paths(".", include_dirs_ini, 
+                            &cfg->include_dirs, &cfg->include_n) != 0) {
+            fprintf(stderr, "%s[error]%s failed to process include dirs\n", 
+                    abs_fore.red, abs_fore.normal);
+            exit(-1);
+        }
     }
 
     cfg->out_dir = nstrdup(ini_get_at(ini, "dirs", "output"));

@@ -1,5 +1,5 @@
 all:
-	gcc -g -fsanitize=address -o ./bin/main ./code/main.c -Icode/abs/include
+	gcc  -o ./bin/main ./code/main.c -Icode/abs/include
 run:
 	./bin/main
 clean:

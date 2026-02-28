@@ -7,8 +7,9 @@
 
 void usage(const char *prog){
 	printf(
-		"usage: %s [PATH] [-h/--help] [gen]"
-		"\n\nPATH - path to configuration, by default 'abs.conf'\n"
+		"usage: %s [-r] [PATH] [-h/--help] [gen]"
+		"\n\n-r - force rebuild project\n"
+		"PATH - path to configuration, by default 'abs.conf'\n"
 		"-h/--help - show this message and exit\n"
 		"-d/--docs - show more help about configuration\n"
 		"gen - generate default config in current directory\n", prog);
@@ -121,7 +122,7 @@ void docs(){
 	printf("Documentation:\n%s\n", docs_str);
 }
 
-int build(const char *prog, const char *confpath){
+int build(const char *prog, const char *confpath, int force_recompile){
 	char *config_dir = get_dir_from_path(confpath);
 	if (!config_dir) {
         fprintf(stderr, "%sfailed%s to determine config directory\n", abs_fore.red, abs_fore.normal);
@@ -148,7 +149,7 @@ int build(const char *prog, const char *confpath){
 		printf("Version %s%s%s\n", abs_fore.blue, prj_ver, abs_fore.normal);
 	}
 
-	build_modules(prog, resolved, &conf);
+	build_modules(prog, resolved, &conf, force_recompile);
 
 	// no files
 	if (ini_check(&conf, "files")){
@@ -165,7 +166,7 @@ int build(const char *prog, const char *confpath){
 		snprintf(cmd, 15000, "MAIN_DIR=%s ", MAIN_DIR);
 	}
 	
-	build_config_emit_cmd(&cconf, cmd + strlen(cmd), sizeof(cmd) - strlen(cmd));
+	build_config_emit_cmd(force_recompile, &cconf, cmd + strlen(cmd), sizeof(cmd) - strlen(cmd));
     
     printf("%s[gen]%s command: %s%s%s\n", abs_fore.blue, abs_fore.normal, abs_fore.gray, cmd, abs_fore.normal);
 	int r = system(cmd);
@@ -186,7 +187,7 @@ _end:
 
 int main(int argc, const char *argv[]){
 	if (argc == 1){
-		return build(argv[0], "abs.conf");
+		return build(argv[0], "abs.conf", 0);
 	}
 
 	if (argc == 2) {
@@ -203,8 +204,21 @@ int main(int argc, const char *argv[]){
 			docs();
 			return 0;
 		}
+
+		if (strcmp("-r", argv[1]) == 0){
+			printf("Forcing recompile...\n");
+			return build(argv[0], "abs.conf", 1);
+		}
 		
-		return build(argv[0], argv[1]);
+		return build(argv[0], argv[1], 0);
+	}
+
+	if (argc == 3){
+		if (strcmp("-r", argv[1]) == 0){
+			return build(argv[0], argv[2], 1);
+		} else {
+			usage(argv[0]);
+		}
 	}
 
 	usage(argv[0]);
