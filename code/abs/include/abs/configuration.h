@@ -222,7 +222,7 @@ static char *extract_lib_name(const char *filepath) {
     return name;
 }
 
-static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_conf *cfg) {
+static int expand_libs(const char *libs_str, compiler_conf *cfg) {
     if (!libs_str) return -1;
     
     char *buf = strdup(libs_str);
@@ -235,96 +235,43 @@ static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_
         if (*token) {
             if (has_glob_chars(token)) {
                 glob_t glob_result;
-                char pattern[PATH_MAX];
+                int ret = glob(token, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
                 
-                if (lib_dirs_str && *lib_dirs_str) {
-                    char *libdirs_buf = strdup(lib_dirs_str);
-                    char *libdirs_saveptr = NULL;
-                    char *libdir = strtok_r(libdirs_buf, " \t\n", &libdirs_saveptr);
-                    
-                    int found = 0;
-                    while (libdir) {
-                        snprintf(pattern, sizeof(pattern), "%s/%s", libdir, token);
+                if (ret == 0) {
+                    for (size_t i = 0; i < glob_result.gl_pathc; i++) {
+                        char *full_path = glob_result.gl_pathv[i];
                         
-                        int ret = glob(pattern, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
+                        char *full_path_copy = strdup(full_path);
+                        if (!full_path_copy) continue;
                         
-                        if (ret == 0 && glob_result.gl_pathc > 0) {
-                            for (size_t i = 0; i < glob_result.gl_pathc; i++) {
-                                char *full_path = glob_result.gl_pathv[i];
-                                
-                                
-                                char *full_path_copy = strdup(full_path);
-                                if (!full_path_copy) continue;
-                                
-                                char *dir = dirname(full_path_copy);
-                                char *dir_copy = strdup(dir);  
-                                char *lib_name = extract_lib_name(full_path);
-                                
-                                if (dir_copy) {
-                                    _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir_copy);
-                                    free(dir_copy);  
-                                }
-                                if (lib_name) {
-                                    _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
-                                    free(lib_name);
-                                }
-                                
-                                free(full_path_copy);
-                            }
-                            found = 1;
-                            globfree(&glob_result);
-                            break;
+                        char *dir = dirname(full_path_copy);
+                        char *lib_name = extract_lib_name(full_path);
+                        
+                        if (dir && strcmp(dir, ".") != 0) {
+                            _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
+                        }
+                        if (lib_name) {
+                            _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
+                            free(lib_name);
                         }
                         
-                        libdir = strtok_r(NULL, " \t\n", &libdirs_saveptr);
+                        free(full_path_copy);
                     }
-                    free(libdirs_buf);
-                    
-                    if (!found) {
-                        fprintf(stderr, "%s[warn]%s no libs matched pattern: %s\n", 
-                                abs_fore.yellow, abs_fore.normal, token);
-                    }
-                } else {
-                    int ret = glob(token, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
-                    
-                    if (ret == 0) {
-                        for (size_t i = 0; i < glob_result.gl_pathc; i++) {
-                            char *full_path = glob_result.gl_pathv[i];
-                            
-                            char *full_path_copy = strdup(full_path);
-                            if (!full_path_copy) continue;
-                            
-                            char *dir = dirname(full_path_copy);
-                            char *dir_copy = strdup(dir);
-                            char *lib_name = extract_lib_name(full_path);
-                            
-                            if (dir_copy) {
-                                _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir_copy);
-                                free(dir_copy);
-                            }
-                            if (lib_name) {
-                                _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
-                                free(lib_name);
-                            }
-                            
-                            free(full_path_copy);
-                        }
-                        globfree(&glob_result);
-                    }
+                    globfree(&glob_result);
+                } else if (ret == GLOB_NOMATCH) {
+                    fprintf(stderr, "%s[warn]%s no libs matched pattern: %s\n", 
+                            abs_fore.yellow, abs_fore.normal, token);
                 }
             } else {
-                
                 if (strchr(token, '/') || strstr(token, ".a") || strstr(token, ".so")) {
                     char *token_copy = strdup(token);
                     if (!token_copy) continue;
                     
                     char *dir = dirname(token_copy);
-                    char *dir_copy = strdup(dir);
                     char *lib_name = extract_lib_name(token);
                     
-                    if (strcmp(dir, ".") != 0 && dir_copy) {
-                        _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir_copy);
-                        free(dir_copy);
+                    if (dir && strcmp(dir, ".") != 0) {
+                        _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
                     }
                     if (lib_name) {
                         _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
@@ -343,7 +290,6 @@ static int expand_libs(const char *lib_dirs_str, const char *libs_str, compiler_
     free(buf);
     return 0;
 }
-
 static int expand_dir_paths(const char *base_dir, const char *dirs_str, 
                             char ***out_arr, size_t *out_n) {
     if (!dirs_str) return 0;
@@ -492,7 +438,7 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     const char *libs_ini = ini_get_at(ini, "dependencies", "libs");
 
     if (libs_ini) {
-        if (expand_libs(lib_dirs_ini, libs_ini, cfg) != 0) {
+        if (expand_libs(libs_ini, cfg) != 0) {
             fprintf(stderr, "%s[error]%s failed to process libs\n", 
                     abs_fore.red, abs_fore.normal);
             exit(-1);
