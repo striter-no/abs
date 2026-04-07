@@ -17,7 +17,7 @@ void usage(const char *prog){
 }
 
 void gen(){
-	const char default_cfg[] = 
+	const char default_cfg[] =
 "[project]\n"
 "name = project\n"
 "version = 0.0.1\n"
@@ -42,7 +42,7 @@ void gen(){
 }
 
 void docs(){
-	const char docs_str[] = 
+	const char docs_str[] =
 "Sections:\n"
 "- project:      name and version of the project\n"
 "- modules:      list of submodules to build before\n"
@@ -159,15 +159,15 @@ int build(const char *prog, const char *confpath, int force_recompile){
 	compiler_conf cconf;
 	memset(&cconf, 0, sizeof(cconf));
 	config_ini_parse(&conf, &cconf);
-	
+
 	char cmd[15000] = {0};
-    
+
 	if (MAIN_DIR){
 		snprintf(cmd, 15000, "MAIN_DIR=%s ", MAIN_DIR);
 	}
-	
+
 	build_config_emit_cmd(force_recompile, &cconf, cmd + strlen(cmd), sizeof(cmd) - strlen(cmd));
-    
+
     printf("%s[gen]%s command: %s%s%s\n", abs_fore.blue, abs_fore.normal, abs_fore.gray, cmd, abs_fore.normal);
 	int r = system(cmd);
 
@@ -209,7 +209,7 @@ int main(int argc, const char *argv[]){
 			printf("Forcing recompile...\n");
 			return build(argv[0], "abs.conf", 1);
 		}
-		
+
 		return build(argv[0], argv[1], 0);
 	}
 
@@ -223,4 +223,3 @@ int main(int argc, const char *argv[]){
 
 	usage(argv[0]);
 }
-

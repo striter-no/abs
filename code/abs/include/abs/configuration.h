@@ -33,6 +33,7 @@ typedef struct {
 
     char *pkg_config_path;
     char **pkg_config_libs;
+    char **pkgs;
     size_t pkg_config_libs_n;
 
     char **defines;
@@ -53,27 +54,27 @@ static int has_glob_chars(const char *str) {
 
 static int _cfg_append_str(char ***arr, size_t *n, const char *str) {
     if (!str) return 0;
-    
+
     char **tmp = realloc(*arr, sizeof(char*) * (*n + 1));
     if (!tmp) return -1;
-    
+
     *arr = tmp;
     (*arr)[*n] = strdup(str);
     if (!(*arr)[*n]) return -1;
-    
+
     (*n)++;
     return 0;
 }
 
 static int _cfg_append_flags(char ***arr, size_t *n, const char *flags) {
     if (!flags || !*flags) return 0;
-    
+
     char *buf = strdup(flags);
     if (!buf) return -1;
-    
+
     char *saveptr = NULL;
     char *token = strtok_r(buf, " \t\n", &saveptr);
-    
+
     while (token) {
         if (*token) {
             if (_cfg_append_str(arr, n, token) != 0) {
@@ -83,25 +84,25 @@ static int _cfg_append_flags(char ***arr, size_t *n, const char *flags) {
         }
         token = strtok_r(NULL, " \t\n", &saveptr);
     }
-    
+
     free(buf);
     return 0;
 }
 
 static char **_str_split(const char *str, char delim, size_t *out_n) {
     if (!str || !out_n) return NULL;
-    
+
     char **result = NULL;
     size_t count = 0;
-    
+
     char *buf = strdup(str);
     if (!buf) return NULL;
 
     char delim_str[2] = {delim, '\0'};
-    
+
     char *saveptr = NULL;
     char *token = strtok_r(buf, delim_str, &saveptr);
-    
+
     while (token) {
         if (*token) {
             char **tmp = realloc(result, sizeof(char*) * (count + 1));
@@ -116,7 +117,7 @@ static char **_str_split(const char *str, char delim, size_t *out_n) {
         }
         token = strtok_r(NULL, delim_str, &saveptr);
     }
-    
+
     free(buf);
     *out_n = count;
     return result;
@@ -124,13 +125,13 @@ static char **_str_split(const char *str, char delim, size_t *out_n) {
 
 char *get_dir_from_path(const char *filepath) {
     if (!filepath) return NULL;
-    
+
     char *path_copy = strdup(filepath);
     if (!path_copy) return NULL;
-    
+
     char *dir = dirname(path_copy);
     char *result = strdup(dir);
-    
+
     free(path_copy);
     return result;
 }
@@ -157,13 +158,13 @@ static int expand_sources(const char *src_dir, const char *sources_str, compiler
                 }
 
                 int ret = glob(pattern, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
-                
+
                 if (ret == 0) {
                     for (size_t i = 0; i < glob_result.gl_pathc; i++) {
                         char *full_path = glob_result.gl_pathv[i];
                         char *relative_path = NULL;
 
-                        
+
                         if (src_dir) {
                             size_t len = strlen(src_dir);
                             if (strncmp(full_path, src_dir, len) == 0) {
@@ -199,17 +200,17 @@ static int expand_sources(const char *src_dir, const char *sources_str, compiler
 
 static char *extract_lib_name(const char *filepath) {
     if (!filepath) return NULL;
-    
+
     const char *filename = strrchr(filepath, '/');
     filename = filename ? filename + 1 : filepath;
-    
+
     if (strncmp(filename, "lib", 3) == 0) {
         filename += 3;
     }
-    
+
     char *name = strdup(filename);
     if (!name) return NULL;
-    
+
     char *dot = strrchr(name, '.');
     if (dot) {
         if (strcmp(dot, ".a") == 0 || strcmp(dot, ".so") == 0) {
@@ -218,35 +219,35 @@ static char *extract_lib_name(const char *filepath) {
             *dot = '\0';
         }
     }
-    
+
     return name;
 }
 
 static int expand_libs(const char *libs_str, compiler_conf *cfg) {
     if (!libs_str) return -1;
-    
+
     char *buf = strdup(libs_str);
     if (!buf) return -1;
-    
+
     char *saveptr = NULL;
     char *token = strtok_r(buf, " \t\n", &saveptr);
-    
+
     while (token) {
         if (*token) {
             if (has_glob_chars(token)) {
                 glob_t glob_result;
                 int ret = glob(token, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
-                
+
                 if (ret == 0) {
                     for (size_t i = 0; i < glob_result.gl_pathc; i++) {
                         char *full_path = glob_result.gl_pathv[i];
-                        
+
                         char *full_path_copy = strdup(full_path);
                         if (!full_path_copy) continue;
-                        
+
                         char *dir = dirname(full_path_copy);
                         char *lib_name = extract_lib_name(full_path);
-                        
+
                         if (dir && strcmp(dir, ".") != 0) {
                             _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
                         }
@@ -254,22 +255,22 @@ static int expand_libs(const char *libs_str, compiler_conf *cfg) {
                             _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
                             free(lib_name);
                         }
-                        
+
                         free(full_path_copy);
                     }
                     globfree(&glob_result);
                 } else if (ret == GLOB_NOMATCH) {
-                    fprintf(stderr, "%s[warn]%s no libs matched pattern: %s\n", 
+                    fprintf(stderr, "%s[warn]%s no libs matched pattern: %s\n",
                             abs_fore.yellow, abs_fore.normal, token);
                 }
             } else {
                 if (strchr(token, '/') || strstr(token, ".a") || strstr(token, ".so")) {
                     char *token_copy = strdup(token);
                     if (!token_copy) continue;
-                    
+
                     char *dir = dirname(token_copy);
                     char *lib_name = extract_lib_name(token);
-                    
+
                     if (dir && strcmp(dir, ".") != 0) {
                         _cfg_append_str(&cfg->lib_dirs, &cfg->lib_dirs_n, dir);
                     }
@@ -277,7 +278,7 @@ static int expand_libs(const char *libs_str, compiler_conf *cfg) {
                         _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, lib_name);
                         free(lib_name);
                     }
-                    
+
                     free(token_copy);
                 } else {
                     _cfg_append_str(&cfg->ldlibs, &cfg->ldlibs_n, token);
@@ -286,46 +287,46 @@ static int expand_libs(const char *libs_str, compiler_conf *cfg) {
         }
         token = strtok_r(NULL, " \t\n", &saveptr);
     }
-    
+
     free(buf);
     return 0;
 }
-static int expand_dir_paths(const char *base_dir, const char *dirs_str, 
+static int expand_dir_paths(const char *base_dir, const char *dirs_str,
                             char ***out_arr, size_t *out_n) {
     if (!dirs_str) return 0;
-    
+
     char *buf = strdup(dirs_str);
     if (!buf) return -1;
-    
+
     char *saveptr = NULL;
     char *token = strtok_r(buf, " \t\n", &saveptr);
-    
+
     while (token) {
         if (*token) {
             if (has_glob_chars(token)) {
                 glob_t glob_result;
                 char pattern[PATH_MAX];
-                
+
                 if (base_dir) {
                     snprintf(pattern, sizeof(pattern), "%s/%s", base_dir, token);
                 } else {
                     snprintf(pattern, sizeof(pattern), "%s", token);
                 }
-                
+
                 int ret = glob(pattern, GLOB_TILDE | GLOB_BRACE | GLOB_ERR, NULL, &glob_result);
-                
+
                 if (ret == 0) {
                     for (size_t i = 0; i < glob_result.gl_pathc; i++) {
                         struct stat st;
                         char *full_path = glob_result.gl_pathv[i];
-                        
+
                         if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
                             _cfg_append_str(out_arr, out_n, full_path);
                         }
                     }
                     globfree(&glob_result);
                 } else if (ret == GLOB_NOMATCH) {
-                    fprintf(stderr, "%s[warn]%s no dirs matched pattern: %s\n", 
+                    fprintf(stderr, "%s[warn]%s no dirs matched pattern: %s\n",
                             abs_fore.yellow, abs_fore.normal, token);
                 }
             } else {
@@ -335,7 +336,7 @@ static int expand_dir_paths(const char *base_dir, const char *dirs_str,
                 } else {
                     snprintf(full_path, sizeof(full_path), "%s", token);
                 }
-                
+
                 struct stat st;
                 if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
                     _cfg_append_str(out_arr, out_n, full_path);
@@ -346,7 +347,7 @@ static int expand_dir_paths(const char *base_dir, const char *dirs_str,
         }
         token = strtok_r(NULL, " \t\n", &saveptr);
     }
-    
+
     free(buf);
     return 0;
 }
@@ -356,20 +357,20 @@ int build_modules(const char *prog, const char *config_dir, ini_config *ini, int
 
     ini_iterator it = ini_iterator_init(ini);
     for (
-        ini_iter i = ini_iterate(&it); 
+        ini_iter i = ini_iterate(&it);
         i.sec_name != NULL;
         i = ini_iterate(&it)
     ){
         if (0 != strcmp(i.sec_name, "modules")) continue;
         printf("%s[modules]%s building module: %s (%s)\n", abs_fore.green, abs_fore.normal, i.key, i.value);
-        
+
         char command[PATH_MAX + 512] = "";
-        
+
         char *inconf_path = get_before(i.value, ',');
         char cdpath_buf[PATH_MAX] = {0};
         snprintf(cdpath_buf, PATH_MAX, "%s/%s", config_dir, inconf_path);
         free(inconf_path);
-        
+
         const char *inconf_confpath = struntilnot(strchr(i.value, ',') + 1, ' ');
         if (!force_recompile){
             snprintf(command, PATH_MAX + 512, "cd %s && MAIN_DIR=%s %s %s", cdpath_buf, config_dir, prog, inconf_confpath);
@@ -400,32 +401,32 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
 
     cfg->compiler = ini_get_at(ini, "compiler", "cc");
     if (!cfg->compiler) cfg->compiler = "gcc";
-    
-    _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
+
+    _cfg_append_flags(&cfg->cflags, &cfg->cflags_n,
                       ini_get_at(ini, "flags", "common"));
-    
-    const char *mode_name = (strcmp(cfg->active_mode, "debug") == 0) 
+
+    const char *mode_name = (strcmp(cfg->active_mode, "debug") == 0)
                             ? "mode.debug" : "mode.release";
     if (mode_name)
-        _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
+        _cfg_append_flags(&cfg->cflags, &cfg->cflags_n,
                         ini_get_at(ini, mode_name, "flags"));
-    
+
     cfg->build_type = nstrdup(ini_get_at(ini, "compiler", "build"));
     if (!cfg->build_type) cfg->build_type = strdup("binary");
 
     cfg->build_phase = nstrdup(ini_get_at(ini, "compiler", "phase"));
     if (!cfg->build_phase) cfg->build_phase = strdup("all");
 
-    const char *sec = ini_get_at(ini, 
-        cfg->active_mode[0] == 'd' ? "mode.debug" : "mode.release", 
+    const char *sec = ini_get_at(ini,
+        cfg->active_mode[0] == 'd' ? "mode.debug" : "mode.release",
         "security");
     cfg->hardening = sec && strcmp(sec, "true") == 0;
-    
+
     const char *cleanup = ini_get_at(ini, "compiler", "cleanup");
     cfg->cleanup = (cleanup == NULL) || strcmp(cleanup, "true") == 0;
 
     if (cfg->hardening) {
-        _cfg_append_flags(&cfg->cflags, &cfg->cflags_n, 
+        _cfg_append_flags(&cfg->cflags, &cfg->cflags_n,
                         ini_get_at(ini, "flags", "hardening"));
     }
 
@@ -433,30 +434,30 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     if (!cfg->obj_dir) {
         cfg->obj_dir = strdup(".objs");
     }
-    
+
     const char *lib_dirs_ini = ini_get_at(ini, "dirs", "libs");
     const char *libs_ini = ini_get_at(ini, "dependencies", "libs");
 
     if (libs_ini) {
         if (expand_libs(libs_ini, cfg) != 0) {
-            fprintf(stderr, "%s[error]%s failed to process libs\n", 
+            fprintf(stderr, "%s[error]%s failed to process libs\n",
                     abs_fore.red, abs_fore.normal);
             exit(-1);
         }
     }
 
     if (lib_dirs_ini) {
-        if (expand_dir_paths(".", lib_dirs_ini, 
+        if (expand_dir_paths(".", lib_dirs_ini,
                             &cfg->lib_dirs, &cfg->lib_dirs_n) != 0) {
-            fprintf(stderr, "%s[error]%s failed to process lib dirs\n", 
+            fprintf(stderr, "%s[error]%s failed to process lib dirs\n",
                     abs_fore.red, abs_fore.normal);
             exit(-1);
         }
     }
-    
+
     cfg->output = nstrdup(ini_get_at(ini, "files", "output"));
     if (!cfg->output){
-        fprintf(stderr, "%s[error]%s no output file set\n", 
+        fprintf(stderr, "%s[error]%s no output file set\n",
                     abs_fore.red, abs_fore.normal);
         exit(-1);
     }
@@ -468,9 +469,9 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
 
     const char *include_dirs_ini = ini_get_at(ini, "dirs", "includes");
     if (include_dirs_ini) {
-        if (expand_dir_paths(".", include_dirs_ini, 
+        if (expand_dir_paths(".", include_dirs_ini,
                             &cfg->include_dirs, &cfg->include_n) != 0) {
-            fprintf(stderr, "%s[error]%s failed to process include dirs\n", 
+            fprintf(stderr, "%s[error]%s failed to process include dirs\n",
                     abs_fore.red, abs_fore.normal);
             exit(-1);
         }
@@ -480,7 +481,7 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     if (!cfg->out_dir){
         cfg->out_dir = strdup(".");
     }
-    
+
     const char *src_list = ini_get_at(ini, "files", "sources");
     if (src_list) {
         if (expand_sources(cfg->src_dir, src_list, cfg) != 0) {
@@ -497,11 +498,11 @@ int config_ini_parse(ini_config *ini, compiler_conf *cfg){
     }
 
     cfg->pkg_config_path = nstrdup(ini_get_at(ini, "dependencies", "pkg_config_path"));
-    const char *pkg_list = ini_get_at(ini, "dependencies", "pkg_config_libs");
+    const char *pkg_list = ini_get_at(ini, "dependencies", "pkgs");
     if (pkg_list) {
         cfg->pkg_config_libs = _str_split(pkg_list, ' ', &cfg->pkg_config_libs_n);
     }
-    
+
     ini_iterator dit = ini_iterator_init(ini);
     for (ini_iter d = ini_iterate(&dit); d.sec_name; d = ini_iterate(&dit)) {
         if (strcmp(d.sec_name, "defines") == 0) {
